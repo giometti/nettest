@@ -153,14 +153,15 @@ extern int nettest_add_time;
 
 #define dump(buf, len, fmt, args...)					\
         do {                                                            \
+		uint8_t *ptr = (uint8_t *) buf;				\
                 size_t i;						\
                 fprintf(stderr, "%s[%4d] %s: " fmt "\n" ,               \
                         __FILE__, __LINE__, __func__ , ## args);        \
 		if (likely((len) > 0)) {				\
 			fprintf(stderr, "          00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f\n  0x0000: "); \
 			for (i = 0; i < (len); i++) {			\
-				fprintf(stderr, "%02x ", buf[i]);              \
-				if ((i + 1) % 16 == 0)                         \
+				fprintf(stderr, "%02x ", ptr[i]);       \
+				if ((i + 1) % 16 == 0)                  \
 					fprintf(stderr, "\n  0x%04zx: ", i + 1);\
 			}						\
 			fprintf(stderr, "\n");				\
