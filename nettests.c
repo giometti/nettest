@@ -42,6 +42,33 @@ static int open_socket(struct comm_info_s *comm)
 		err_if_exit(ret < 0, EXIT_FAILURE, "cannot bind socket: %m");
 		break;
 
+        case NETTEST_INFO_TYPE_ETHERNET:
+                dbg("selected communication protocol is Ethernet");
+
+                s = socket(AF_PACKET, SOCK_RAW, htons(NETTEST_ETH_P));
+                err_if_exit(s < 0, EXIT_FAILURE, "unable to open socket: %m");
+
+                /* Complete the Ethernet sockaddr_ll data */
+                ret = get_ifindex(s, comm->proto.eth.if_name);
+                err_if_exit(ret < 0, EXIT_FAILURE,
+                                        "cannot get interface index");
+                comm->proto.eth.raw_address.sll_ifindex = ret;
+                comm->proto.eth.raw_address.sll_family = AF_PACKET;
+                comm->proto.eth.raw_address.sll_protocol = htons(NETTEST_ETH_P);
+                comm->proto.eth.raw_address.sll_halen = ETH_ALEN;
+
+                ret = bind(s, (struct sockaddr *) &comm->proto.eth.raw_address,
+                                sizeof(comm->proto.eth.raw_address));
+                err_if_exit(ret < 0, EXIT_FAILURE,
+                                        "cannot bind interface");
+
+                /* Get the MAC address of the interface to recv from */
+                ret = get_ifaddr(s, comm->proto.eth.if_name,
+                                        comm->proto.eth.raw_if_address);
+                err_if_exit(ret < 0, EXIT_FAILURE,
+                                        "cannot get MAC address: %m");
+
+                break;
 
         default:
                 err("unsupported communication protocol!");
@@ -63,6 +90,17 @@ static ssize_t send_data(int s, struct comm_info_s *comm,
                        (struct sockaddr *) &comm->proto.udp.raw_peer_address,
 				addr_len);
 
+        case NETTEST_INFO_TYPE_ETHERNET:
+		addr_len = sizeof(comm->proto.eth.raw_peer_address);
+                memcpy(pkt->proto.eth.eth.ether_shost,
+                                comm->proto.eth.raw_if_address, ETH_ALEN);
+                memcpy(pkt->proto.eth.eth.ether_dhost,
+                                comm->proto.eth.raw_peer_address.sll_addr,
+								ETH_ALEN);
+                pkt->proto.eth.eth.ether_type = htons(0xabba);
+
+                return sendto(s, pkt, len, 0, NULL, 0);
+
         default:
                 err("unsupported communication protocol!");
                 exit(EXIT_FAILURE);
@@ -80,6 +118,12 @@ static ssize_t recv_data(int s, struct comm_info_s *comm,
                 return recvfrom(s, pkt, len, 0,
                        (struct sockaddr *) &comm->proto.udp.raw_peer_address,
 				& addr_len);
+
+	case NETTEST_INFO_TYPE_ETHERNET:
+		addr_len = sizeof(comm->proto.eth.raw_peer_address);
+		return recvfrom(s, pkt, len, 0,
+			(struct sockaddr *) &comm->proto.eth.raw_peer_address,
+                                & addr_len);
 
         default:
                 err("unsupported communication protocol!");
@@ -211,6 +255,7 @@ static void usage(void)
                 "usage: %s [-h | --help] [-d | --debug] [-t | --print-time]\n"
                 "               [-v | --version]\n"
                 "               [-p <port>] [-m addr]\n"
+                "               [-i | --use-ethernet <iface>]\n"
                 "  defaults are:\n"
                 "    - port is %d",
                         NAME, NETTEST_UDP_PORT);
@@ -230,12 +275,14 @@ int main(int argc, char **argv)
                 { "debug",              no_argument,            NULL, 'd'},
                 { "print-time",         no_argument,            NULL, 't'},
                 { "version",            no_argument,            NULL, 'v'},
+		{ "use-ethernet",       required_argument,      NULL, 'i'},
                 { 0, 0, 0, 0    /* END */ }
         };
         int option_index = 0;
 	int s;
 	struct comm_info_s comm = { .type = NETTEST_INFO_TYPE_UDP };
 	unsigned int port = NETTEST_UDP_PORT;
+	char *if_name = NULL;
 	char *multicast_addr = NULL;
 
         /*
@@ -246,7 +293,7 @@ int main(int argc, char **argv)
         while (1) {
                 option_index = 0; /* getopt_long stores the option index here */
 
-                c = getopt_long(argc, argv, "hdtvp:m:",
+                c = getopt_long(argc, argv, "hdtvp:m:i:",
                                 long_options, &option_index);
 
                 /* Detect the end of the options */
@@ -275,6 +322,11 @@ int main(int argc, char **argv)
                                 EXIT_FAILURE, "port number must in in [1, 65535]");
                         break;
 
+                case 'i':
+                        if_name = optarg;
+                        comm.type = NETTEST_INFO_TYPE_ETHERNET;
+                        break;
+
 		case 'm':
 			multicast_addr = optarg;
 			break;
@@ -295,6 +347,9 @@ int main(int argc, char **argv)
 		comm.proto.udp.port = port;
 		comm.proto.udp.multicast_address = multicast_addr;
 		break;
+	case NETTEST_INFO_TYPE_ETHERNET:
+		comm.proto.eth.if_name = if_name;
+		break;
 	}
 
         /* Print some useful information and do the job */
@@ -305,6 +360,10 @@ int main(int argc, char **argv)
 		if (comm.proto.udp.multicast_address)
 			printf("accepting packets from multicast address %s",
 				comm.proto.udp.multicast_address);
+		break;
+	case NETTEST_INFO_TYPE_ETHERNET:
+		info("accepting Ethernet packets on iface: %s",
+						comm.proto.eth.if_name);
 		break;
 	}
 
