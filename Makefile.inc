@@ -5,7 +5,7 @@ VERSION := $(shell git describe --tags --abbrev=10 \
 				echo "v0.0.0")
 CC := $(CROSS_COMPILE)gcc
 AR := $(CROSS_COMPILE)ar
-CFLAGS += -O2 -Wall -D_GNU_SOURCE -D__NETTEST_VERSION__=\"$(VERSION)\"
+CFLAGS += -O2 -Wall -D_GNU_SOURCE -D__VERSION=\"$(VERSION)\"
 CFLAGS += -MMD    # automatic .d dependency file generation
 # CFLAGS += -Werror
 

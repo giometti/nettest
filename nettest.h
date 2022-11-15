@@ -11,7 +11,7 @@
 
 #include "misc.h"
 
-#define NETTEST_VERSION		__NETTEST_VERSION__
+#define NETTEST_VERSION		__VERSION
 #define NETTEST_PERIOD_MS	1000
 #define NETTEST_UDP_PORT	5000
 #define NETTEST_ETH_P		0xabba
