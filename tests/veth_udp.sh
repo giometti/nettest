@@ -10,6 +10,7 @@
 function do_setup () {
 	set -e
 	
+	debug "creating vEthernets..."
 	R ip link add veth0 type veth peer name veth1
 
 	debug "adding namespace ns0..."
@@ -47,7 +48,7 @@ function do_destroy () {
 	debug "removing namespace ns0..."
 	R ip netns delete ns0
 
-	debug "removing vEthernets"
+	debug "removing vEthernets..."
 	R ip link del veth0
 }
 
