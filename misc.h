@@ -98,58 +98,38 @@ extern int __add_time;
                 __message(stderr, 0, fmt, ## args)
 #define err(fmt, args...)                                               \
                 __message(stderr, 0, fmt, ## args)
-#define err_if(exp, fmt, args...)					\
-		do {							\
-			if (unlikely(exp))				\
-				err("(%s) " fmt , #exp , ## args);	\
-		} while (0)
-#define err_if_exit(exp, ret, fmt, args...)				\
-		do {							\
-			if (unlikely(exp)) {				\
-				err("(%s) " fmt , #exp , ## args);	\
-				exit(ret);				\
-			}						\
-		} while (0)
-#define err_if_ret(exp, ret, fmt, args...)				\
-		do {							\
-			if (unlikely(exp)) {				\
-				err("(%s) " fmt , #exp , ## args);	\
-				return ret;				\
-			}						\
-		} while (0)
 #define warn(fmt, args...)                                              \
                 __message(stderr, 0, fmt , ## args)
-#define warn_if(exp, fmt, args...)					\
-		do {							\
-			if (unlikely(exp))				\
-				warn("(%s) " fmt , #exp , ## args);	\
-		} while (0)
 #define info(fmt, args...)                                              \
                 __message(stderr, 0, fmt, ## args)
 #define dbg(fmt, args...)                                               \
                 __message(stderr, 1, fmt, ## args)
-#define dbg_if(exp, fmt, args...)					\
-		do {							\
-			if (unlikely(exp)) {				\
-				dbg("(%s) " fmt , #exp , ## args);	\
-			}						\
-		} while (0)
-#define dbg_if_ret(exp, ret, fmt, args...)				\
-		do {							\
-			if (unlikely(exp)) {				\
-				dbg("(%s) " fmt , #exp , ## args);	\
-				return ret;				\
-			}						\
-		} while (0)
 #define vdbg(fmt, args...)						\
                 __message(stderr, 3, fmt, ## args)
-#define vdbg_if_ret(exp, ret, fmt, args...)				\
+
+#define __type_op(__t, __op, exp, ret, fmt, args...)			\
 		do {							\
 			if (unlikely(exp)) {				\
-				vdbg("(%s) " fmt , #exp , ## args);	\
-				return ret;				\
+				__t("(%s) " fmt , #exp , ## args);\
+				__op(ret);				\
 			}						\
 		} while (0)
+#define err_if(exp, fmt, args...)					\
+				__type_op(err, if, exp, 0, fmt, ## args)
+#define err_if_exit(exp, ret, fmt, args...)				\
+				__type_op(err, exit, exp, ret, fmt, ## args)
+#define err_if_ret(exp, ret, fmt, args...)				\
+				__type_op(err, return, exp, ret, fmt, ## args)
+#define warn_if(exp, fmt, args...)					\
+				__type_op(warn, if, exp, 0, fmt, ## args)
+#define warn_if_ret(exp, ret, fmt, args...)				\
+				__type_op(warn, return, exp, ret, fmt, ## args)
+#define dbg_if(exp, fmt, args...)					\
+				__type_op(dbg, if, exp, 0, fmt, ## args)
+#define dbg_if_ret(exp, ret, fmt, args...)				\
+				__type_op(dbg, return, exp, ret, fmt, ## args)
+#define vdbg_if_ret(exp, ret, fmt, args...)				\
+				__type_op(vdbg, return, exp, ret, fmt, ## args)
 
 #define dump(buf, len, fmt, args...)					\
         do {                                                            \
