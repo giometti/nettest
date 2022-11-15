@@ -225,9 +225,9 @@ static void mainloop(int s, struct comm_info_s *comm)
 				info("packet out of order (last=%d curr=%d)",
 					prev_pkt_num, pkt_recv.pkt_num);
 			else if (pkt_recv.pkt_num != prev_pkt_num + 1) {
-				info("%d packets missed (downtime=%luus)\n",
+				info("%d packets missed (downtime=%03gus)\n",
 				     abs(pkt_recv.pkt_num - prev_pkt_num),
-				     elapsed_us);
+				     elapsed_us/1000.);
 
 				prev_pkt_num = pkt_recv.pkt_num;
 			} else
