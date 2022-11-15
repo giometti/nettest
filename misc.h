@@ -110,7 +110,10 @@ extern int __add_time;
 #define __type_op(__t, __op, exp, ret, fmt, args...)			\
 		do {							\
 			if (unlikely(exp)) {				\
-				__t("(%s) " fmt , #exp , ## args);\
+				if (unlikely(__debug_level > 0))	\
+					__t("(%s) " fmt , #exp , ## args);\
+				else					\
+					__t(fmt , ## args);		\
 				__op(ret);				\
 			}						\
 		} while (0)
