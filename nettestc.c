@@ -69,9 +69,10 @@ static void send_data(int s, char *dst_addr)
 		pkt_sent.filler[i] = i;
 
 	/* Compute the size of the packet to transmit.
-	 * The packet structure is declared with a static payload of 1500 bytes.
+	 * The packet structure is declared with a static payload of
+	 * NETTEST_FILLER_SIZE bytes.
 	 */
-	data_size = sizeof(pkt_sent) - 1500 + packet_size;
+	data_size = sizeof(pkt_sent) - NETTEST_FILLER_SIZE + packet_size;
 	period_us = period_ms * 1000;
 
 	srv_addr.sin_family = AF_INET;
@@ -178,6 +179,9 @@ int main(int argc, char **argv)
         };
         int option_index = 0;
 	char *addr = NULL;
+	int min_packet_size = sizeof(struct data_packet) -
+				NETTEST_FILLER_SIZE + 2,
+	    max_packet_size = sizeof(struct data_packet) + 2;
 	int s;
 
         /*
@@ -217,12 +221,12 @@ int main(int argc, char **argv)
 
 		case 's':
 			packet_size = strtoul(optarg, NULL, 10);
-			if (packet_size < sizeof(struct data_packet) - 1500 + 2) {
-				printf
-				    ("Packet size is too small. Min size is %ld bytes\n",
-				     sizeof(struct data_packet) - 1500 + 2);
-				exit(1);
-			}
+			err_if_exit(packet_size < min_packet_size, EXIT_FAILURE,
+				    "packet size too small. Min allowed size "
+				    "is %d bytes", min_packet_size);
+			err_if_exit(packet_size > max_packet_size, EXIT_FAILURE,
+				    "packet size too large. Max allowed size "
+				    "is %d bytes", max_packet_size);
 			break;
 
 		case 'f':
