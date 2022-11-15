@@ -26,7 +26,7 @@ function do_setup () {
 	R ip link set veth1 up
 
 	debug "executing nettestd within ns0..."
-	info "After nettestd starting you can do:\n\t../nettestc $nettest_debug 192.168.22.1"
+	info "After nettestd starting you can do:\n\t../nettestc $nettest_debug -f 200 192.168.22.1"
 	info "nettestd started with:\n\tip netns exec ns0 ../nettests $nettest_debug"
 	nettest_debug="" ; [ $DEBUG -eq 1 ] && nettest_debug="-d"
 	R ip netns exec ns0 ../nettests $nettest_debug
