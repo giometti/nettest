@@ -5,7 +5,6 @@ int nettest_debug_level;
 int nettest_add_time;
 
 static unsigned int udp_port = NETTEST_UDP_PORT;
-static unsigned int packet_size = NETTEST_PACKET_SIZE;
 
 static int prompt_n;
 static char prompt_symbol[] = { '|', '/', '-', '\\' };
@@ -28,7 +27,7 @@ static int open_socket(void)
 	return s;
 }
 
-static void receive_data(int s, char *maddr, int filler_size)
+static void receive_data(int s, char *maddr)
 {
 	struct sockaddr_in cli_addr;
 	socklen_t n;
@@ -177,11 +176,10 @@ static void usage(void)
         fprintf(stderr,
                 "usage: %s [-h | --help] [-d | --debug] [-t | --print-time]\n"
                 "               [-v | --version]\n"
-                "               [-p <port>] [-s <size>] [-m addr]\n"
+                "               [-p <port>] [-m addr]\n"
                 "  defaults are:\n"
-                "    - port is %d\n"
-                "    - size is %d bytes for payload\n",
-                        NAME, udp_port, packet_size);
+                "    - port is %d",
+                        NAME, udp_port);
 
         exit(EXIT_FAILURE);
 }
@@ -212,7 +210,7 @@ int main(int argc, char **argv)
         while (1) {
                 option_index = 0; /* getopt_long stores the option index here */
 
-                c = getopt_long(argc, argv, "hdtvp:s:m:",
+                c = getopt_long(argc, argv, "hdtvp:m:",
                                 long_options, &option_index);
 
                 /* Detect the end of the options */
@@ -241,10 +239,6 @@ int main(int argc, char **argv)
                                 EXIT_FAILURE, "port number must in in [1, 65535]");
                         break;
 
-		case 's':
-			packet_size = strtoul(optarg, NULL, 10);
-			break;
-
 		case 'm':
 			maddr = optarg;
 			break;
@@ -263,10 +257,9 @@ int main(int argc, char **argv)
 	info("accepting packets on port: %d", udp_port);
 	if (maddr)
 		printf("accepting packets from multicast address %s", maddr);
-	info("waiting for packets of %d bytes", packet_size);
 
 	s = open_socket();
-	receive_data(s, maddr, packet_size);
+	receive_data(s, maddr);
 
 	return 0;
 }
