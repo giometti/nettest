@@ -4,71 +4,109 @@
 int nettest_debug_level;
 int nettest_add_time;
 
-static unsigned int udp_port = NETTEST_UDP_PORT;
-
 static int prompt_n;
 static char prompt_symbol[] = { '|', '/', '-', '\\' };
 
-static int open_socket(void)
+static int open_socket(struct comm_info_s *comm)
 {
 	int s;
 	struct sockaddr_in addr;
+	struct ip_mreq mc_request;
 	int ret;
 
-	s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-        err_if_exit(s < 0, EXIT_FAILURE, "unable to open socket: %m");
+	switch (comm->type) {
+	case NETTEST_INFO_TYPE_UDP:
+		dbg("selected communication protocol is UDP");
 
-	addr.sin_family = AF_INET;
-	addr.sin_port = htons(udp_port);
-	addr.sin_addr.s_addr = htonl(INADDR_ANY);
-	ret = bind(s, (struct sockaddr *) &addr, sizeof(addr));
-	err_if_exit(ret < 0, EXIT_FAILURE, "cannot bind socket: %m");
+		s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	        err_if_exit(s < 0, EXIT_FAILURE, "unable to open socket: %m");
 
-	return s;
+		if (comm->proto.udp.multicast_address) {
+			/* Construct a IGMP join request structure */
+			mc_request.imr_multiaddr.s_addr =
+				inet_addr(comm->proto.udp.multicast_address);
+			mc_request.imr_interface.s_addr = htonl(INADDR_ANY);
+
+			/* Set ADD MEMBERSHIP message */
+			ret = setsockopt(s, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                                (void *)&mc_request, sizeof(mc_request));
+			err_if_exit(ret < 0, EXIT_FAILURE,
+					"cannot add membership: %m");
+                }
+
+		/* Bind the socket */
+		addr.sin_family = AF_INET;
+		addr.sin_port = htons(comm->proto.udp.port);
+		addr.sin_addr.s_addr = htonl(INADDR_ANY);
+		ret = bind(s, (struct sockaddr *) &addr, sizeof(addr));
+		err_if_exit(ret < 0, EXIT_FAILURE, "cannot bind socket: %m");
+		break;
+
+
+        default:
+                err("unsupported communication protocol!");
+                exit(EXIT_FAILURE);
+        }
+
+        return s;
 }
 
-static void receive_data(int s, char *maddr)
+static ssize_t send_data(int s, struct comm_info_s *comm,
+                                struct data_packet_s *pkt, size_t len)
 {
-	struct sockaddr_in cli_addr;
-	socklen_t n;
+	socklen_t addr_len;
+
+        switch (comm->type) {
+        case NETTEST_INFO_TYPE_UDP:
+		addr_len = sizeof(comm->proto.udp.raw_peer_address);
+                return sendto(s, pkt, len, 0,
+                       (struct sockaddr *) &comm->proto.udp.raw_peer_address,
+				addr_len);
+
+        default:
+                err("unsupported communication protocol!");
+                exit(EXIT_FAILURE);
+        }
+}
+
+static ssize_t recv_data(int s, struct comm_info_s *comm,
+                                struct data_packet_s *pkt, size_t len)
+{
+	socklen_t addr_len;
+
+        switch (comm->type) {
+        case NETTEST_INFO_TYPE_UDP:
+		addr_len = sizeof(comm->proto.udp.raw_peer_address);
+                return recvfrom(s, pkt, len, 0,
+                       (struct sockaddr *) &comm->proto.udp.raw_peer_address,
+				& addr_len);
+
+        default:
+                err("unsupported communication protocol!");
+                exit(EXIT_FAILURE);
+        }
+}
+
+static void mainloop(int s, struct comm_info_s *comm)
+{
 	int receive = 1;
 	unsigned int prev_pkt_num;
-	int data_size;
-	static struct data_packet packet;
-	struct ip_mreq mc_request;	/* multicast request structure */
+	static struct data_packet_s pkt_recv;
 	struct timeval t1, t2, t3;
 	long delta_s, delta_u, delta_point;
 	unsigned long elapsed_us;
 	unsigned long long elapsed_avg_us;
 	ssize_t nrecv, nsent;
-
-	if (maddr) {
-		/* construct a IGMP join request structure */
-		mc_request.imr_multiaddr.s_addr = inet_addr(maddr);
-		mc_request.imr_interface.s_addr = htonl(INADDR_ANY);
-
-		/* send an ADD MEMBERSHIP message via setsockopt */
-		if ((setsockopt(s, IPPROTO_IP, IP_ADD_MEMBERSHIP,
-				(void *)&mc_request, sizeof(mc_request))) < 0) {
-			perror("setsockopt() failed");
-			exit(1);
-		}
-	}
+	char *str;
 
 	prev_pkt_num = 0;
-	data_size = sizeof(packet);
-
 	elapsed_avg_us = 0;
 	t1.tv_sec = t2.tv_sec = t3.tv_sec = 0;
 	t1.tv_usec = t2.tv_usec = t3.tv_usec = 0;
 	delta_s = delta_u = delta_point = 0;
 
-	bzero(&cli_addr, sizeof(cli_addr));
-	n = sizeof(cli_addr);
-
 	while (receive) {
-		nrecv = recvfrom(s, &packet, data_size, 0,
-			      (struct sockaddr *) &cli_addr, &n);
+		nrecv = recv_data(s, comm, &pkt_recv, sizeof(pkt_recv));
 		err_if_exit(nrecv < 0, EXIT_FAILURE,
 					"cannot receive packet: %m");
 
@@ -82,24 +120,24 @@ static void receive_data(int s, char *maddr)
 			delta_u = t2.tv_usec - t1.tv_usec;
 		}
 
-		if (packet.command == NETTEST_CMD_START) {
+		if (pkt_recv.command == NETTEST_CMD_START) {
 			info("new transmission detected, resetting counters");
 
-			if (packet.period_ms)
+			if (pkt_recv.period_ms)
 				info("frequency announced is 1 packet "
-						"every %dms", packet.period_ms);
+					"every %dms", pkt_recv.period_ms);
 			else
 				info("frequency announced is at wire speed");
 
-			info("client address is %s:%u",
-				       inet_ntoa(cli_addr.sin_addr),
-				       ntohs(cli_addr.sin_port));
+			info("client address is %s",
+				str = nettest_get_peer_address(comm));
+			free(str);
 
 			prev_pkt_num = 0;
 			elapsed_avg_us = 0;
 			t1.tv_usec = t3.tv_usec = 0;
 			t1.tv_sec = t3.tv_sec = 0;
-		} else if (packet.command == NETTEST_CMD_STOP)
+		} else if (pkt_recv.command == NETTEST_CMD_STOP)
 			info("transmission completed, "
 				"received %u packets (avg ipt %lluus)",
 				prev_pkt_num, elapsed_avg_us);
@@ -129,38 +167,34 @@ static void receive_data(int s, char *maddr)
 			elapsed_avg_us = (elapsed_avg_us + elapsed_us) / 2;
 		else
 			elapsed_avg_us = elapsed_us;
-		dbg("recv pkt=%u/%u from=%s size=%ld ipt=%luus",
-			     packet.pkt_num, prev_pkt_num,
-			     inet_ntoa(cli_addr.sin_addr), nrecv,
-			     elapsed_us);
+		dbg("recv pkt=%u/%u size=%ld ipt=%luus",
+		     pkt_recv.pkt_num, prev_pkt_num, nrecv, elapsed_us);
 
 		/*
 		 * Check the sequence number of the received packet
 		 * and report warings if any.
 		 */
 		if (prev_pkt_num) {
-			if ((packet.pkt_num == prev_pkt_num))
+			if ((pkt_recv.pkt_num == prev_pkt_num))
 				info("duplicated packet received (curr=%d)",
-					packet.pkt_num);
-			else if ((packet.pkt_num < prev_pkt_num)) /* probable packed duplication */
+					pkt_recv.pkt_num);
+			else if ((pkt_recv.pkt_num < prev_pkt_num)) /* probable packed duplication */
 				info("packet out of order (last=%d curr=%d)",
-					prev_pkt_num, packet.pkt_num);
-			else if (packet.pkt_num != prev_pkt_num + 1) {
+					prev_pkt_num, pkt_recv.pkt_num);
+			else if (pkt_recv.pkt_num != prev_pkt_num + 1) {
 				info("%d packets missed (downtime=%luus\n",
-				     abs(packet.pkt_num - prev_pkt_num),
+				     abs(pkt_recv.pkt_num - prev_pkt_num),
 				     elapsed_us);
 
-				prev_pkt_num = packet.pkt_num;
+				prev_pkt_num = pkt_recv.pkt_num;
 			} else
-				prev_pkt_num = packet.pkt_num;
+				prev_pkt_num = pkt_recv.pkt_num;
 		} else
-			prev_pkt_num = packet.pkt_num;
+			prev_pkt_num = pkt_recv.pkt_num;
 
-		if (packet.mode == NETTEST_MODE_ACK) {
+		if (pkt_recv.mode == NETTEST_MODE_ACK) {
 			dbg("sending ACK required by the client");
-			nsent = (sendto(s, &packet, nrecv, 0,
-				      (struct sockaddr *)&cli_addr,
-				      sizeof(cli_addr)));
+			nsent = send_data(s, comm, &pkt_recv, nrecv);
 			err_if_exit(nsent < 0, EXIT_FAILURE,
                                         "cannot send ACK packet: %m");
 		}
@@ -179,7 +213,7 @@ static void usage(void)
                 "               [-p <port>] [-m addr]\n"
                 "  defaults are:\n"
                 "    - port is %d",
-                        NAME, udp_port);
+                        NAME, NETTEST_UDP_PORT);
 
         exit(EXIT_FAILURE);
 }
@@ -200,7 +234,9 @@ int main(int argc, char **argv)
         };
         int option_index = 0;
 	int s;
-	char *maddr = NULL;
+	struct comm_info_s comm = { .type = NETTEST_INFO_TYPE_UDP };
+	unsigned int port = NETTEST_UDP_PORT;
+	char *multicast_addr = NULL;
 
         /*
          * Parse options in command line
@@ -234,13 +270,13 @@ int main(int argc, char **argv)
                         exit(EXIT_SUCCESS);
 
                 case 'p':
-                        udp_port = strtoul(optarg, NULL, 10);
-                        err_if_exit(udp_port = 0 || udp_port > 65535,
+                        port = strtoul(optarg, NULL, 10);
+                        err_if_exit(port = 0 || port > 65535,
                                 EXIT_FAILURE, "port number must in in [1, 65535]");
                         break;
 
 		case 'm':
-			maddr = optarg;
+			multicast_addr = optarg;
 			break;
 
                 case ':':
@@ -253,13 +289,27 @@ int main(int argc, char **argv)
 		}
 	}
 
-	info("running UDP server ver %s", NETTEST_VERSION);
-	info("accepting packets on port: %d", udp_port);
-	if (maddr)
-		printf("accepting packets from multicast address %s", maddr);
+        /* Setup communication information */
+	switch (comm.type) {
+	case NETTEST_INFO_TYPE_UDP:
+		comm.proto.udp.port = port;
+		comm.proto.udp.multicast_address = multicast_addr;
+		break;
+	}
 
-	s = open_socket();
-	receive_data(s, maddr);
+        /* Print some useful information and do the job */
+	info("running server ver %s", NETTEST_VERSION);
+	switch (comm.type) {
+	case NETTEST_INFO_TYPE_UDP:
+		info("accepting UDP packets on port: %d", comm.proto.udp.port);
+		if (comm.proto.udp.multicast_address)
+			printf("accepting packets from multicast address %s",
+				comm.proto.udp.multicast_address);
+		break;
+	}
+
+	s = open_socket(&comm);
+	mainloop(s, &comm);
 
 	return 0;
 }

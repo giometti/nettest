@@ -4,54 +4,97 @@
 int nettest_debug_level;
 int nettest_add_time;
 
-static unsigned int period_ms = 1000;
-static unsigned int packets_num = 0;
-static unsigned int send_ack = 0;
-static unsigned int udp_port = NETTEST_UDP_PORT;
-static unsigned int packet_size = NETTEST_PACKET_SIZE;
-
 /*
  * Local functions
  */
 
-static int open_socket(void)
+static int open_socket(struct comm_info_s *comm)
 {
 	int s;
 	int on;
 	u_char ttl;
 	int ret;
 
-	s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	err_if_exit(s < 0, EXIT_FAILURE, "unable to open socket: %m");
+	switch (comm->type) {
+	case NETTEST_INFO_TYPE_UDP:
+		dbg("selected communication protocol is UDP");
 
-	/* Set socket to allow broadcast */
-	on = 1;
-	ret = setsockopt(s, SOL_SOCKET, SO_BROADCAST,
-				(void *) &on, sizeof(on));
-	err_if_exit(ret < 0, EXIT_FAILURE, "cannot set broadcast permission: %m");
+		s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+		err_if_exit(s < 0, EXIT_FAILURE, "unable to open socket: %m");
 
-	/* Set multicast TTL for multicast packets */
-	ttl = 5;
-	ret = setsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
-	err_if_exit(ret < 0, EXIT_FAILURE, "cannot set multicast TTL: %m");
+		/* Set socket to allow broadcast */
+		on = 1;
+		ret = setsockopt(s, SOL_SOCKET, SO_BROADCAST,
+					(void *) &on, sizeof(on));
+		err_if_exit(ret < 0, EXIT_FAILURE,
+					"cannot set broadcast permission: %m");
+
+		/* Set multicast TTL for multicast packets */
+		ttl = 5;
+		ret = setsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
+		err_if_exit(ret < 0, EXIT_FAILURE,
+					"cannot set multicast TTL: %m");
+
+		/* Complete UDP struct sockaddr_in data */
+		comm->proto.udp.raw_address.sin_family = AF_INET;
+		comm->proto.udp.raw_address.sin_port =
+					htons(comm->proto.udp.port);
+		break;
+
+	default:
+		err("unsupported communication protocol!");
+		exit(EXIT_FAILURE);
+	}
 
 	return s;
 }
 
-static void send_data(int s, char *dst_addr)
+static ssize_t send_data(int s, struct comm_info_s *comm,
+				struct data_packet_s *pkt, size_t len)
+{
+	switch (comm->type) {
+	case NETTEST_INFO_TYPE_UDP:
+		return sendto(s, pkt, len, 0,
+				(struct sockaddr *) &comm->proto.udp.raw_address,
+				sizeof(comm->proto.udp.raw_address));
+
+        default:
+                err("unsupported communication protocol!");
+                exit(EXIT_FAILURE);
+        }
+}
+
+static ssize_t recv_data(int s, struct comm_info_s *comm,
+				struct data_packet_s *pkt, size_t len)
+{
+	struct sockaddr_in addr;
+	socklen_t addr_len;
+
+        switch (comm->type) {
+        case NETTEST_INFO_TYPE_UDP:
+		bzero(&addr, sizeof(addr));
+		addr_len = sizeof(addr);
+		return recvfrom(s, pkt, len, 0,
+				(struct sockaddr *) &addr, &addr_len);
+
+        default:
+                err("unsupported communication protocol!");
+                exit(EXIT_FAILURE);
+        }
+}
+
+static void mainloop(int s, struct comm_info_s *comm)
 {
 	int done;
-	struct data_packet pkt_sent, pkt_recv;
-	int data_size = sizeof(unsigned int) + packet_size;
-	struct sockaddr_in srv_addr, cli_addr;
-	socklen_t n;
+	struct data_packet_s pkt_sent, pkt_recv;
+	int data_size = sizeof(unsigned int) + comm->packet_size;
 	ssize_t nsent, nrecv;
 	struct timeval t1, t2, t_after;
 	long delta_s, delta_u;
 	unsigned int elapsed_us, period_us;
 	unsigned long long rtt_us_avg;
 	unsigned int cnt;
-	int i, ret;
+	int i;
 
 	/*
 	 * The command on the first packet of the stream should be the
@@ -60,39 +103,29 @@ static void send_data(int s, char *dst_addr)
 	pkt_sent.command = NETTEST_CMD_START;
 
 	/* enable ACK mode if required */
-	pkt_sent.mode = send_ack ? NETTEST_MODE_ACK : NETTEST_MODE_NONE;
+	pkt_sent.mode = comm->use_ack ? NETTEST_MODE_ACK : NETTEST_MODE_NONE;
 
 	/* Initialize the rest of transmitted structure */
 	pkt_sent.pkt_num = 0;
-	pkt_sent.period_ms = period_ms;
-	for (i = 0; i < packet_size; i++)
+	pkt_sent.period_ms = comm->period_ms;
+	for (i = 0; i < comm->packet_size; i++)
 		pkt_sent.filler[i] = i;
 
 	/* Compute the size of the packet to transmit.
 	 * The packet structure is declared with a static payload of
 	 * NETTEST_FILLER_SIZE bytes.
 	 */
-	data_size = sizeof(pkt_sent) - NETTEST_FILLER_SIZE + packet_size;
-	period_us = period_ms * 1000;
+	data_size = sizeof(pkt_sent) - NETTEST_FILLER_SIZE + comm->packet_size;
 
-	srv_addr.sin_family = AF_INET;
-	srv_addr.sin_port = htons(udp_port);
-	srv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-	/* srv_addr.sin_addr.s_addr = htonl(INADDR_BROADCAST); */
-
-	ret = inet_aton(dst_addr, &srv_addr.sin_addr);
-	err_if_exit(ret < 0, EXIT_FAILURE, "cannot convert IP address");
-
+	period_us = comm->period_ms * 1000;
 	rtt_us_avg = 0;
 	cnt = 0;
-
 	done = 0;
 	while (!done) {
-		if (send_ack)
+		if (comm->use_ack)
 			gettimeofday(&t1, NULL);
 
-		nsent = sendto(s, &pkt_sent, data_size, 0,
-			    (struct sockaddr *) &srv_addr, sizeof(srv_addr));
+		nsent = send_data(s, comm, &pkt_sent, data_size);
 		err_if_exit(nsent < 0, EXIT_FAILURE, "cannot send packet: %m");
 		gettimeofday(&t_after, NULL);
 		dbg("transmitted %ld bytes", nsent);
@@ -108,19 +141,15 @@ static void send_data(int s, char *dst_addr)
 		 * if we have choosen to send a predefined number of packets
 		 * send a CMD_STOP for signaling the last packet.
 		 */
-		if (packets_num && pkt_sent.pkt_num > packets_num)
+		if (comm->packets_num && pkt_sent.pkt_num > comm->packets_num)
 			pkt_sent.command = NETTEST_CMD_STOP;
 
 		/*
 		 * If we have enabled packets acknowledge we shoud wait for a
 		 * response from the partner
 		 */
-		if (send_ack) {
-			bzero(&cli_addr, sizeof(cli_addr));
-			n = sizeof(cli_addr);
-
-			nrecv = recvfrom(s, &pkt_recv, sizeof(pkt_recv), 0,
-			      (struct sockaddr *) &cli_addr, &n);
+		if (comm->use_ack) {
+			nrecv = recv_data(s, comm, &pkt_recv, sizeof(pkt_recv));
 			err_if_exit(nrecv < 0, EXIT_FAILURE,
 					"cannot receive ACK  packet: %m");
 			gettimeofday(&t2, NULL);
@@ -139,7 +168,7 @@ static void send_data(int s, char *dst_addr)
 		}
 	}
 	info("transmitted %u packets of %d bytes", pkt_sent.pkt_num, data_size);
-	if (send_ack)
+	if (comm->use_ack)
 		info("average RTT: %lluus", rtt_us_avg / cnt);
 }
 
@@ -156,9 +185,9 @@ static void usage(void)
 		"  defaults are:\n"
 		"    - port is %d\n"
 		"    - size is %d bytes for payload\n"
-		"    - period is %dms\n"
-		"    - packets is %d packets to be sent\n",
-			NAME, udp_port, packet_size, period_ms, packets_num);
+		"    - period is %dms",
+			NAME, NETTEST_UDP_PORT, NETTEST_PACKET_SIZE,
+				NETTEST_PERIOD_MS);
 
         exit(EXIT_FAILURE);
 }
@@ -178,11 +207,17 @@ int main(int argc, char **argv)
                 { 0, 0, 0, 0    /* END */ }
         };
         int option_index = 0;
-	char *addr = NULL;
-	int min_packet_size = sizeof(struct data_packet) -
+	int min_packet_size = sizeof(struct data_packet_s) -
 				NETTEST_FILLER_SIZE + 2,
-	    max_packet_size = sizeof(struct data_packet) + 2;
+	    max_packet_size = sizeof(struct data_packet_s) + 2;
 	int s;
+	struct comm_info_s comm = { .type = NETTEST_INFO_TYPE_UDP };
+	unsigned int port = NETTEST_UDP_PORT;
+	size_t packet_size = NETTEST_PACKET_SIZE;
+	unsigned int period_ms = NETTEST_PERIOD_MS;
+	bool use_ack = 0;
+	static unsigned int packets_num = 0;
+	char *str;
 
         /*
          * Parse options in command line
@@ -216,7 +251,7 @@ int main(int argc, char **argv)
                         exit(EXIT_SUCCESS);
 
 		case 'a':
-			send_ack = 1;
+			use_ack = 1;
 			break;
 
 		case 's':
@@ -238,8 +273,8 @@ int main(int argc, char **argv)
 			break;
 
 		case 'p':
-			udp_port = strtoul(optarg, NULL, 10);
-			err_if_exit(udp_port = 0 || udp_port > 65535,
+			port = strtoul(optarg, NULL, 10);
+			err_if_exit(port = 0 || port > 65535,
 				EXIT_FAILURE, "port number must in in [1, 65535]");
 			break;
 
@@ -254,22 +289,39 @@ int main(int argc, char **argv)
 	}
 	if (argc - optind < 1)
 		usage();
-	addr = argv[optind];
 
-	info("running UDP client ver %s.", NETTEST_VERSION);
-	info("connecting with UDP server at %s:%d", addr, udp_port);
-	if (period_ms)
-		info("sending %d bytes packets every %dms", packet_size,
-								period_ms);
+	/* Setup communication information */
+	switch (comm.type) {
+	case NETTEST_INFO_TYPE_UDP:
+		comm.proto.udp.port = port;
+		break;
+	}
+	nettest_set_address(&comm, argv[optind]);
+	comm.packet_size = packet_size;
+	comm.period_ms = period_ms;
+	comm.packets_num = packets_num;
+	comm.use_ack = use_ack;
+
+	/* Print some useful information and do the job */
+	info("running client ver %s.", NETTEST_VERSION);
+	info("connecting with %s server at %s",
+				nettest_get_proto(&comm),
+				str = nettest_get_address(&comm));
+	free(str);
+	if (comm.period_ms)
+		info("sending %ld bytes packets every %dms",
+				comm.packet_size, comm.period_ms);
 	else
-		info("sending %d bytes packets at wire speed", packet_size);
-	if (packets_num)
-		info("total packets number to transmit is %u", packets_num);
-	if (send_ack)
+		info("sending %ld bytes packets at wire speed",
+				comm.packet_size);
+	if (comm.packets_num)
+		info("total packets number to transmit is %u",
+				comm.packets_num);
+	if (comm.use_ack)
 		info("ACK reception is enabled");
 
-	s = open_socket();
-	send_data(s, addr);
+	s = open_socket(&comm);
+	mainloop(s, &comm);
 
 	return 0;
 }
