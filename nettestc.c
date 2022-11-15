@@ -1,8 +1,8 @@
 #include <getopt.h>
 #include "nettest.h"
 
-int nettest_debug_level;
-int nettest_add_time;
+int __debug_level;
+int __add_time;
 
 /*
  * Local functions
@@ -279,11 +279,11 @@ int main(int argc, char **argv)
 			usage();
 
                 case 'd':
-                        nettest_debug_level++;
+                        __debug_level++;
                         break;
 
                 case 't':
-                        nettest_add_time++;
+                        __add_time++;
                         break;
 
                 case 'v':

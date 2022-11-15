@@ -1,8 +1,8 @@
 #include <getopt.h>
 #include "nettest.h"
 
-int nettest_debug_level;
-int nettest_add_time;
+int __debug_level;
+int __add_time;
 
 static int prompt_n;
 static char prompt_symbol[] = { '|', '/', '-', '\\' };
@@ -193,8 +193,7 @@ static void mainloop(int s, struct comm_info_s *comm)
 		 * - print a 'dot' every second
 		 */
 		printf("\b%c", prompt_symbol[prompt_n]);
-		if (nettest_debug_level == 0 &&
-		     (t2.tv_sec - t3.tv_sec) > 1) {
+		if (__debug_level == 0 && (t2.tv_sec - t3.tv_sec) > 1) {
 			t3 = t2;
 			printf("\b.%c", prompt_symbol[prompt_n]);
 		}
@@ -305,11 +304,11 @@ int main(int argc, char **argv)
                         usage();
 
                 case 'd':
-                        nettest_debug_level++;
+                        __debug_level++;
                         break;
 
                 case 't':
-                        nettest_add_time++;
+                        __add_time++;
                         break;
 
                 case 'v':

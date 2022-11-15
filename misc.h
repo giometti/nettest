@@ -63,20 +63,20 @@
 	_a > _b ? _a : _b;\
 })
 
-extern int nettest_debug_level;
-extern int nettest_add_time;
+extern int __debug_level;
+extern int __add_time;
 #define __message(stream, layout, fmt, args...)				\
         do {                                                            \
 		struct timespec t;					\
-		if (nettest_add_time)					\
+		if (__add_time)						\
 			clock_gettime(CLOCK_MONOTONIC, &t);		\
                 switch (layout) {					\
 		case 0:							\
                         fprintf(stream, "[%s] " fmt "\n", NAME, ## args);\
                         break;                                          \
 		case 1:							\
-                        if (unlikely(nettest_debug_level >= layout)) {	\
-				if (nettest_add_time)			\
+                        if (unlikely(__debug_level >= layout)) {	\
+				if (__add_time)				\
 					fprintf(stream, "%ld.%09ld ",	\
 						t.tv_sec, t.tv_nsec);	\
 				fprintf(stream, "[%s] %s: " fmt "\n", 	\
@@ -84,8 +84,8 @@ extern int nettest_add_time;
 			}						\
                         break;                                          \
 		default:						\
-                        if (unlikely(nettest_debug_level >= layout)) {	\
-				if (nettest_add_time)			\
+                        if (unlikely(__debug_level >= layout)) {	\
+				if (__add_time)				\
 					fprintf(stream, "%ld.%09ld ",	\
 						t.tv_sec, t.tv_nsec);	\
                                 fprintf(stream, "[%s](%s@%d) %s: " fmt "\n",\
@@ -170,7 +170,7 @@ extern int nettest_add_time;
 
 #define dbg_dump(buf, len, fmt, args...)				\
         do {                                                            \
-                if (unlikely(nettest_debug_level == 2))			\
+                if (unlikely(__debug_level == 2))			\
 			dump(buf, len, fmt, ## args);			\
         } while (0)
 
