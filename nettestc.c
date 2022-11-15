@@ -223,7 +223,7 @@ static void usage(void)
 		"  defaults are:\n"
 		"    - port is %d\n"
 		"    - size is %d bytes for payload\n"
-		"    - period is %dms",
+		"    - period is %dms\n",
 			NAME, NETTEST_UDP_PORT, NETTEST_PACKET_SIZE,
 				NETTEST_PERIOD_MS);
 

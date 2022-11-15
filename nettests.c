@@ -256,7 +256,7 @@ static void usage(void)
                 "               [-p <port>] [-m addr]\n"
                 "               [-i | --use-ethernet <iface>]\n"
                 "  defaults are:\n"
-                "    - port is %d",
+                "    - port is %d\n",
                         NAME, NETTEST_UDP_PORT);
 
         exit(EXIT_FAILURE);
